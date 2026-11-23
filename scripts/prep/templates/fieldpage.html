@@ -1,0 +1,620 @@
+<title>경사 현장 검증</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: 현장용 한 손 도구. 진행 현황 → 지도(자유 이동, 내 위치) → 선택 지점 측정 카드 → 요약 → 전체 목록. 고대비, 큰 터치 영역 */
+:root{
+  --paper:#f6f5f1; --card:#ffffff; --ink:#1b1d1f; --muted:#5d6166; --line:#d9d7cf;
+  --vis:#e8590c; --vis-ink:#ffffff; --me:#1c7ed6; --ok:#2b8a3e; --warn:#c77700; --bad:#c92a2a;
+  --soft:#efede6;
+  --f-body:"IBM Plex Sans KR",system-ui,-apple-system,"Malgun Gothic",sans-serif;
+  --f-num:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#141516; --card:#1e2022; --ink:#f1f0ec; --muted:#a3a7ab; --line:#34373a;
+  --vis:#ff7a2e; --vis-ink:#141516; --me:#4dabf7; --ok:#51cf66; --warn:#ffb340; --bad:#ff6b6b; --soft:#26292b; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#141516; --card:#1e2022; --ink:#f1f0ec; --muted:#a3a7ab; --line:#34373a;
+  --vis:#ff7a2e; --vis-ink:#141516; --me:#4dabf7; --ok:#51cf66; --warn:#ffb340; --bad:#ff6b6b; --soft:#26292b; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 40px;margin:0}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--paper)}
+.wrap{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+header{position:sticky;top:env(safe-area-inset-top,0px);z-index:6;background:var(--paper);padding-block:12px 10px;border-bottom:2px solid var(--ink);display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px}
+h1{font-size:1.25rem;margin:0;letter-spacing:-.01em}
+h2{font-size:1.05rem;margin:4px 0 0}
+.stat{font-family:var(--f-num);font-size:.95rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.stat b{color:var(--ink)}
+.note{font-size:.85rem;color:var(--muted)}
+.banner{border:1.5px solid var(--warn);background:var(--soft);padding:8px 12px;border-radius:6px;font-size:.9rem}
+.btn{font:inherit;font-weight:500;min-height:44px;padding:0 14px;border-radius:8px;border:1.5px solid var(--ink);background:var(--card);color:var(--ink);cursor:pointer}
+.btn:focus-visible,.mk:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,.map:focus-visible{outline:3px solid var(--vis);outline-offset:2px}
+.btn.primary{background:var(--vis);border-color:var(--vis);color:var(--vis-ink)}
+.btn.ghost{border-color:var(--line)}
+.btn[aria-pressed="true"]{background:var(--me);border-color:var(--me);color:#fff}
+.btn:disabled{opacity:.5}
+
+/* 지도: 드래그·핀치·휠로 자유 이동 */
+.map{position:relative;height:min(64vh,580px);overflow:hidden;border:1.5px solid var(--ink);border-radius:8px;background:var(--soft);touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+.map.dragging{cursor:grabbing}
+.stage{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+.stage img{display:block;width:100%;height:100%;max-width:none;pointer-events:none;-webkit-user-drag:none}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .stage img{filter:brightness(.82) contrast(1.05)}}
+:root[data-theme="dark"] .stage img{filter:brightness(.82) contrast(1.05)}
+.mk{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:2.5px solid #e8590c;background:#fff;color:#1b1d1f;
+  font:600 12px/1 var(--f-num);display:grid;place-items:center;cursor:pointer;padding:0;box-shadow:0 1px 3px rgba(0,0,0,.35);transform:scale(var(--inv,1));z-index:2}
+.mk.done{background:#1b1d1f;color:#fff;border-color:#1b1d1f}
+.mk.skip{background:#868e96;color:#fff;border-color:#868e96}
+.mk.flag{border-radius:6px}
+.mk.sel{background:#e8590c;color:#fff;border-color:#fff;z-index:4;transform:scale(calc(var(--inv,1) * 1.25))}
+.arrow{position:absolute;width:0;height:0;pointer-events:none;z-index:3;transform:scale(var(--inv,1))}
+.arrow span{position:absolute;left:-3px;bottom:0;width:6px;height:52px;background:#e8590c;transform-origin:50% 100%;border-radius:3px}
+.arrow span::after{content:"";position:absolute;left:-7px;top:-10px;border:10px solid transparent;border-bottom:14px solid #e8590c;border-top:0}
+.me{position:absolute;width:0;height:0;pointer-events:none;z-index:5}
+.me .acc{position:absolute;border-radius:50%;background:rgba(28,126,214,.16);border:1.5px solid rgba(28,126,214,.6);transform:translate(-50%,-50%)}
+.me .dot{position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:#1c7ed6;border:3px solid #fff;box-shadow:0 0 0 2px rgba(28,126,214,.35),0 1px 4px rgba(0,0,0,.4);transform:scale(var(--inv,1))}
+.ctrl{position:absolute;right:calc(10px + env(safe-area-inset-right,0px));top:10px;display:flex;flex-direction:column;gap:6px;z-index:7}
+.ctrl .btn{min-width:44px;padding:0 10px;font-size:1.1rem;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.ctrl .btn.txt{font-size:.85rem}
+.scalebar{position:absolute;left:10px;bottom:10px;z-index:7;font:600 11px var(--f-num);color:#1b1d1f;background:rgba(255,255,255,.85);padding:2px 6px;border-radius:4px}
+.scalebar i{display:block;height:4px;border:2px solid #1b1d1f;border-top:0;margin-top:2px}
+.gps{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:8px}
+.gps .note{flex:1;min-width:200px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.8rem;color:var(--muted);margin-top:6px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:-1px;margin-right:4px;border:2px solid #e8590c;background:#fff}
+.legend i.d{background:#1b1d1f;border-color:#1b1d1f}.legend i.f{border-radius:3px}.legend i.s{background:#c4784a;border-color:#c4784a;border-radius:2px}.legend i.m{background:#1c7ed6;border-color:#fff;box-shadow:0 0 0 1px #1c7ed6}
+
+/* 측정 카드 */
+.card{background:var(--card);border:1.5px solid var(--ink);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:14px}
+.card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.pid{font:600 1.6rem/1 var(--f-num)}
+.pid small{font:500 .85rem var(--f-body);color:var(--muted);margin-left:6px}
+.chip{display:inline-block;font-size:.8rem;font-weight:700;padding:3px 8px;border-radius:999px;border:1.5px solid var(--warn);color:var(--warn)}
+.chip.ok{border-color:var(--ok);color:var(--ok)}
+.dem{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media (min-width:560px){.dem{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.dem small{display:block;font:500 .8rem var(--f-num);color:var(--muted)}
+.dem div{background:var(--soft);border-radius:8px;padding:8px 10px;min-width:0}
+.dem span{display:block;font-size:.75rem;color:var(--muted);letter-spacing:.02em}
+.dem b{font:600 1.35rem var(--f-num);font-variant-numeric:tabular-nums}
+.dir{display:flex;align-items:center;gap:12px;font-size:.95rem}
+.compass{width:52px;height:52px;border-radius:50%;border:2px solid var(--ink);position:relative;flex:none}
+.compass::before{content:"N";position:absolute;top:1px;left:50%;transform:translateX(-50%);font:600 10px var(--f-num);color:var(--muted)}
+.compass i{position:absolute;left:50%;top:50%;width:4px;height:22px;margin-left:-2px;margin-top:-22px;background:var(--vis);transform-origin:50% 100%;border-radius:2px}
+.dist{font-size:.95rem;background:var(--soft);border-radius:8px;padding:8px 12px}
+.dist b{font-family:var(--f-num)}
+.links{display:flex;gap:16px;flex-wrap:wrap}
+.links a{color:var(--ink);font-weight:500;text-decoration:underline;text-underline-offset:3px;min-height:44px;display:inline-flex;align-items:center}
+.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.field{min-width:0}
+.field label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:4px}
+.inrow{display:flex;gap:6px}
+.inrow input{flex:1;min-width:0}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--card);border:1.5px solid var(--line);border-radius:8px;min-height:44px;padding:0 10px;width:100%}
+input{font-family:var(--f-num);font-size:1.15rem;font-variant-numeric:tabular-nums}
+textarea{padding:8px 10px;min-height:64px;resize:vertical}
+.sign{width:48px;flex:none;padding:0}
+.result{display:flex;gap:16px;flex-wrap:wrap;align-items:baseline;border-top:1px dashed var(--line);padding-top:12px}
+.result div span{display:block;font-size:.75rem;color:var(--muted)}
+.result b{font:600 1.3rem var(--f-num);font-variant-numeric:tabular-nums}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.actions .grow{flex:1}
+.saved{font-size:.85rem;color:var(--ok);min-height:1.2em}
+.saved.err{color:var(--bad)}
+/* 목록·요약 */
+.tablebox{overflow-x:auto;border:1.5px solid var(--line);border-radius:8px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+th{font-size:.75rem;color:var(--muted);font-weight:500;letter-spacing:.02em}
+td:first-child,th:first-child,td:nth-child(2),th:nth-child(2){text-align:left}
+td.n{font-family:var(--f-num)}
+tr.sel td{background:var(--soft)}
+tbody tr{cursor:pointer}
+.e-ok{color:var(--ok)}.e-warn{color:var(--warn)}.e-bad{color:var(--bad)}
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.summary div{background:var(--card);border:1.5px solid var(--line);border-radius:8px;padding:10px 12px}
+.summary span{display:block;font-size:.75rem;color:var(--muted)}
+.summary b{font:600 1.3rem var(--f-num)}
+details{background:var(--card);border:1.5px solid var(--line);border-radius:8px;padding:10px 14px}
+summary{font-weight:700;cursor:pointer;min-height:32px;display:flex;align-items:center}
+details ol{padding-left:1.2em;margin:8px 0 4px}
+details li{margin-bottom:6px}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>경사 현장 검증</h1>
+    <span class="stat" id="prog">측정 <b>0</b>/30</span>
+    <span class="stat" id="mae">평균 |오차| <b>–</b></span>
+  </header>
+
+  <p class="note">시험 지점에서 DEM(1:5,000 등고선으로 만든 5m 격자)이 계산한 진행 방향 경사와 디지털 수평계로 잰 경사를 비교합니다. 지도는 끌어서 옮기고, 두 손가락이나 휠로 확대합니다. 번호를 누르면 측정 칸이 열립니다.</p>
+  <div class="banner" id="status" hidden></div>
+
+  <details>
+    <summary>측정 방법 (처음 한 번 읽기)</summary>
+    <ol>
+      <li><b>출발 전:</b> 평평한 곳에서 수평계를 보정합니다(설명서의 영점 보정). 단위는 <b>각도(°)</b>로 맞춥니다. 입력한 각도는 페이지가 %로 바꿔 DEM과 비교합니다.</li>
+      <li><b>지점 찾기:</b> <b>내 위치</b>를 켜면 파란 점이 지도에 나오고, 선택한 지점까지 거리와 방향이 보입니다. 번호 위치(도로 중심선)에서 가장 가까운 <b>보도나 길 가장자리</b>에서 잽니다.</li>
+      <li><b>방향:</b> 주황 화살표가 DEM상 <b>오르막 방향</b>입니다. 화살표 방향으로 길을 따라 수평계를 놓습니다.</li>
+      <li><b>부호:</b> 화살표 방향으로 <b>올라가면 +</b>, 실제로는 내려가면 <b>−</b>. ± 버튼으로 부호를 바꿉니다.</li>
+      <li><b>세 곳에서 재기:</b> 지점 기준 <b>뒤 5m</b>(약 7걸음), <b>중앙</b>, <b>앞 5m</b>. <b>중앙값은 DEM 5m 경사</b>와, <b>세 곳 평균은 DEM 10m 경사</b>와 비교합니다.</li>
+      <li><b>180° 확인(선택):</b> 중앙에서 수평계 양 끝을 바꿔 한 번 더 재서 적으면 수평계 영점 오차가 빠집니다.</li>
+      <li>턱, 맨홀, 줄눈 위는 피합니다. 갈 수 없는 지점은 <b>측정 불가</b>로 표시합니다.</li>
+    </ol>
+  </details>
+
+  <section aria-label="지도">
+    <div class="map" id="map" tabindex="0" aria-label="배경 지도. 끌어서 이동, 두 손가락 또는 휠로 확대">
+      <div class="stage" id="stage">
+        <img id="base" src="__BASEMAP__" alt="배경 지도: 도로, 건물, 인도, 계단, 5m 등고선" draggable="false">
+        <div class="arrow" id="arrow" hidden><span></span></div>
+        <div class="me" id="me" hidden><div class="acc" id="acc"></div><div class="dot"></div></div>
+      </div>
+      <div class="ctrl">
+        <button class="btn" id="zin" type="button" aria-label="확대">+</button>
+        <button class="btn" id="zout" type="button" aria-label="축소">−</button>
+        <button class="btn txt" id="zfit" type="button">전체</button>
+      </div>
+      <div class="scalebar" id="scalebar"><span id="scaleTxt">100 m</span><i id="scaleBar" style="width:60px"></i></div>
+    </div>
+    <div class="gps">
+      <button class="btn" id="gpsBtn" type="button" aria-pressed="false">내 위치 켜기</button>
+      <button class="btn ghost" id="followBtn" type="button" aria-pressed="false" disabled>따라가기</button>
+      <button class="btn ghost" id="nearBtn" type="button" disabled>가까운 지점</button>
+      <span class="note" id="gpsMsg">위치를 켜면 현재 위치와 지점까지 거리가 보입니다.</span>
+    </div>
+    <div class="legend">
+      <span><i></i>측정 전</span><span><i class="d"></i>측정 완료</span><span><i class="f"></i>옹벽·계단 근처</span><span><i class="s"></i>계단·스탠드</span><span><i class="m"></i>내 위치</span><span>주황 화살표: DEM 오르막 방향(위가 북쪽)</span>
+    </div>
+  </section>
+
+  <section class="card" id="card" aria-live="polite">
+    <div class="card-head">
+      <div class="pid" id="cId">H01<small id="cOrder"></small></div>
+      <span class="chip ok" id="cFlag">주의 없음</span>
+    </div>
+    <div class="dem">
+      <div><span>DEM 경사 5m</span><b id="cS5">–</b><small id="cS5d"></small></div>
+      <div><span>DEM 경사 10m</span><b id="cS10">–</b><small id="cS10d"></small></div>
+      <div><span>DEM 경사 30m</span><b id="cS30">–</b><small id="cS30d"></small></div>
+      <div><span>DEM 표고</span><b id="cZ">–</b></div>
+    </div>
+    <div class="dir"><div class="compass" aria-hidden="true"><i id="cNeedle"></i></div><div id="cDir"></div></div>
+    <div class="dist" id="cDist" hidden></div>
+    <div class="links">
+      <a id="lMap" href="#" target="_blank" rel="noopener">카카오맵에서 위치 보기</a>
+      <a id="lRv" href="#" target="_blank" rel="noopener">로드뷰</a>
+    </div>
+    <form id="form" class="fields" autocomplete="off">
+      <div class="field"><label for="fBack">뒤 5m (°)</label><div class="inrow"><input id="fBack" inputmode="decimal" placeholder="예: 2.4"><button type="button" class="btn sign" data-for="fBack" aria-label="뒤 5m 부호 바꾸기">±</button></div></div>
+      <div class="field"><label for="fCenter">중앙 (°)</label><div class="inrow"><input id="fCenter" inputmode="decimal" placeholder="예: 2.6"><button type="button" class="btn sign" data-for="fCenter" aria-label="중앙 부호 바꾸기">±</button></div></div>
+      <div class="field"><label for="fFront">앞 5m (°)</label><div class="inrow"><input id="fFront" inputmode="decimal" placeholder="예: 2.9"><button type="button" class="btn sign" data-for="fFront" aria-label="앞 5m 부호 바꾸기">±</button></div></div>
+      <div class="field"><label for="fC180">중앙 180° 돌려서 (°, 선택)</label><div class="inrow"><input id="fC180" inputmode="decimal" placeholder="예: -2.3"><button type="button" class="btn sign" data-for="fC180" aria-label="180도 값 부호 바꾸기">±</button></div></div>
+      <div class="field"><label for="fSurface">노면</label><select id="fSurface"><option value="">선택</option><option>보도블록</option><option>아스팔트</option><option>콘크리트</option><option>기타</option></select></div>
+      <div class="field"><label for="fPlace">잰 위치</label><select id="fPlace"><option value="">선택</option><option>보도</option><option>차도 가장자리</option><option>캠퍼스 길</option><option>기타</option></select></div>
+      <div class="field" style="grid-column:1/-1"><label for="fNote">메모 (옹벽, 계단, 턱 등 눈에 띈 것)</label><textarea id="fNote"></textarea></div>
+    </form>
+    <div class="result">
+      <div><span>세 곳 평균</span><b id="rMean">–</b></div>
+      <div><span>오차: 평균 − DEM 10m</span><b id="rErr">–</b></div>
+      <div><span>오차: 중앙 − DEM 5m</span><b id="rErr5">–</b></div>
+      <div><span>등급 (측정 / DEM 10m)</span><b id="rGrade">–</b></div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="prev" type="button">이전</button>
+      <button class="btn primary grow" id="save" type="button">저장</button>
+      <button class="btn" id="next" type="button">다음</button>
+    </div>
+    <div class="actions">
+      <button class="btn ghost grow" id="skip" type="button">측정 불가로 표시</button>
+    </div>
+    <div class="saved" id="savedMsg" role="status"></div>
+  </section>
+
+  <section>
+    <h2>요약</h2>
+    <div class="summary" id="summary" style="margin-top:8px"></div>
+    <p class="note" id="sumNote"></p>
+  </section>
+
+  <section>
+    <h2>전체 지점</h2>
+    <div class="tablebox" style="margin-top:8px">
+      <table>
+        <thead><tr><th>순서</th><th>지점</th><th>DEM 5m</th><th>DEM 10m</th><th>측정 평균</th><th>오차 10m</th><th>오차 5m</th><th>상태</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn" id="csv" type="button" hidden>CSV 내려받기</button>
+      <button class="btn ghost" id="copy" type="button">CSV 복사</button>
+    </div>
+    <textarea id="csvText" hidden aria-label="CSV 텍스트"></textarea>
+  </section>
+</div>
+
+<script>
+const POINTS = /*__POINTS__*/[];
+const META = /*__META__*/{};
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : (v > 0 ? "+" : "") + v.toFixed(d);
+const DIRS = ["북","북북동","북동","동북동","동","동남동","남동","남남동","남","남남서","남서","서남서","서","서북서","북서","북북서"];
+const dirName = b => DIRS[Math.round(((b % 360) + 360) % 360 / 22.5) % 16];
+const grade = s => s === null || s === undefined || Number.isNaN(s) ? "–" : (Math.abs(s) <= 5.6 ? "가능" : Math.abs(s) <= 8.3 ? "주의" : "어려움");
+const LSKEY = "slope-checks-v1";
+
+let checks = {};
+let sel = 0;
+let dirty = false;
+let db = null, uid = null, canWrite = true, mode = "local";
+
+function parseNum(v) {
+  if (v === undefined || v === null) return null;
+  const t = String(v).replace(/[−–]/g, "-").replace(/\s/g, "").replace(",", ".");
+  if (t === "" || t === "-") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : NaN;
+}
+// 입력은 각도(°). 비교는 %로: % = tan(각도) × 100
+const deg2pct = d => Math.tan(d * Math.PI / 180) * 100;
+const pct2deg = p => Math.atan(p / 100) * 180 / Math.PI;
+const has = v => v !== null && v !== undefined && !Number.isNaN(v);
+function centerDeg(c) {
+  if (!c || !has(c.center)) return null;
+  return has(c.center180) ? (c.center - c.center180) / 2 : c.center;   // 180° 돌려 잰 값으로 영점 오차 제거
+}
+function meanDeg(c) {
+  if (!c) return null;
+  const vals = [c.back, centerDeg(c), c.front].filter(has);
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+const measuredMean = c => { const d = meanDeg(c); return d === null ? null : deg2pct(d); };   // %
+const measuredCenter = c => { const d = centerDeg(c); return d === null ? null : deg2pct(d); }; // %
+const errCls = e => e === null ? "" : Math.abs(e) <= 1 ? "e-ok" : Math.abs(e) <= 3 ? "e-warn" : "e-bad";
+// 위경도 → 지도 % 좌표 (1차 변환식)
+const toPct = (lon, lat) => [META.geo.x[0] * lon + META.geo.x[1] * lat + META.geo.x[2], META.geo.y[0] * lon + META.geo.y[1] * lat + META.geo.y[2]];
+function distBearing(lat1, lon1, lat2, lon2) {
+  const R = 6371000, toR = Math.PI / 180;
+  const x = (lon2 - lon1) * toR * Math.cos((lat1 + lat2) / 2 * toR), y = (lat2 - lat1) * toR;
+  return [Math.hypot(x, y) * R, (Math.atan2(x, y) / toR + 360) % 360];
+}
+
+/* ---------- 지도: 자유 이동 ---------- */
+const map = $("map"), stage = $("stage");
+const W = META.w, H = META.h;
+stage.style.width = W + "px"; stage.style.height = H + "px";
+let s = 1, tx = 0, ty = 0, fitS = 1;
+const MAXS = () => fitS * 10;
+function apply() {
+  stage.style.transform = `translate(${tx}px,${ty}px) scale(${s})`;
+  stage.style.setProperty("--inv", String(1 / s));
+  updateScale();
+}
+function clampView() {
+  const cw = map.clientWidth, ch = map.clientHeight, sw = W * s, sh = H * s;
+  const m = 60; // 가장자리 여유
+  tx = sw + 2 * m <= cw ? (cw - sw) / 2 : Math.min(m, Math.max(cw - sw - m, tx));
+  ty = sh + 2 * m <= ch ? (ch - sh) / 2 : Math.min(m, Math.max(ch - sh - m, ty));
+}
+function zoomAt(f, px, py) {
+  const ns = Math.max(fitS * 0.9, Math.min(MAXS(), s * f));
+  const k = ns / s;
+  tx = px - (px - tx) * k; ty = py - (py - ty) * k; s = ns;
+  clampView(); apply();
+}
+function fit() {
+  fitS = Math.min(map.clientWidth / W, map.clientHeight / H);
+  s = fitS; tx = (map.clientWidth - W * s) / 2; ty = (map.clientHeight - H * s) / 2; apply();
+}
+function centerOnPct(px, py, minScale) {
+  if (minScale && s < minScale) s = Math.min(MAXS(), minScale);
+  tx = map.clientWidth / 2 - W * px / 100 * s; ty = map.clientHeight / 2 - H * py / 100 * s;
+  clampView(); apply();
+}
+function updateScale() {
+  const mPerScreenPx = META.mpp / s;
+  const target = 90 * mPerScreenPx; // 약 90px 막대
+  const nice = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find(n => n >= target * 0.6) || 1000;
+  $("scaleBar").style.width = (nice / mPerScreenPx) + "px";
+  $("scaleTxt").textContent = nice >= 1000 ? (nice / 1000) + " km" : nice + " m";
+}
+// 포인터: 한 손가락 끌기, 두 손가락 핀치
+const ptrs = new Map();
+let dragStart = null, pinchStart = null, moved = false, suppressClick = false;
+map.addEventListener("pointerdown", e => {
+  if (e.target.closest(".ctrl")) return;
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  moved = false;
+  if (ptrs.size === 1) dragStart = { x: e.clientX, y: e.clientY, tx, ty };
+  if (ptrs.size === 2) {
+    const [a, b] = [...ptrs.values()];
+    pinchStart = { d: Math.hypot(a.x - b.x, a.y - b.y), s, tx, ty, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+  }
+});
+map.addEventListener("pointermove", e => {
+  if (!ptrs.has(e.pointerId)) return;
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const r = map.getBoundingClientRect();
+  if (ptrs.size >= 2 && pinchStart) {
+    const [a, b] = [...ptrs.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    const mx = (a.x + b.x) / 2 - r.left, my = (a.y + b.y) / 2 - r.top;
+    const ns = Math.max(fitS * 0.9, Math.min(MAXS(), pinchStart.s * d / pinchStart.d));
+    const k = ns / pinchStart.s;
+    const smx = pinchStart.mx - r.left, smy = pinchStart.my - r.top;
+    tx = mx - (smx - pinchStart.tx) * k; ty = my - (smy - pinchStart.ty) * k; s = ns;
+    moved = true; following(false); clampView(); apply();
+  } else if (dragStart) {
+    const dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y;
+    if (!moved && Math.hypot(dx, dy) > 6) { moved = true; map.classList.add("dragging"); try { map.setPointerCapture(e.pointerId); } catch (_) {} following(false); }
+    if (moved) { tx = dragStart.tx + dx; ty = dragStart.ty + dy; clampView(); apply(); }
+  }
+});
+function endPtr(e) {
+  if (!ptrs.has(e.pointerId)) return;
+  ptrs.delete(e.pointerId);
+  if (moved) suppressClick = true, setTimeout(() => suppressClick = false, 50);
+  if (ptrs.size === 1) { const [a] = [...ptrs.values()]; dragStart = { x: a.x, y: a.y, tx, ty }; pinchStart = null; }
+  if (ptrs.size === 0) { dragStart = null; pinchStart = null; map.classList.remove("dragging"); }
+}
+map.addEventListener("pointerup", endPtr);
+map.addEventListener("pointercancel", endPtr);
+map.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = map.getBoundingClientRect();
+  zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
+}, { passive: false });
+map.addEventListener("dblclick", e => {
+  if (e.target.closest(".mk,.ctrl")) return;
+  const r = map.getBoundingClientRect(); zoomAt(2, e.clientX - r.left, e.clientY - r.top);
+});
+map.addEventListener("keydown", e => {
+  const step = 60, c = [map.clientWidth / 2, map.clientHeight / 2];
+  const k = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
+  if (k) { e.preventDefault(); tx += k[0]; ty += k[1]; clampView(); apply(); }
+  if (e.key === "+" || e.key === "=") zoomAt(1.5, ...c);
+  if (e.key === "-") zoomAt(1 / 1.5, ...c);
+});
+$("zin").onclick = () => zoomAt(1.6, map.clientWidth / 2, map.clientHeight / 2);
+$("zout").onclick = () => zoomAt(1 / 1.6, map.clientWidth / 2, map.clientHeight / 2);
+$("zfit").onclick = () => { following(false); fit(); };
+let lastW = 0;
+new ResizeObserver(() => { if (map.clientWidth !== lastW) { const first = lastW === 0; lastW = map.clientWidth; const prev = fitS; fitS = Math.min(map.clientWidth / W, map.clientHeight / H); if (first) fit(); else { s = s * fitS / prev; clampView(); apply(); } } }).observe(map);
+
+const markers = POINTS.map((p, i) => {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "mk" + (p.flags ? " flag" : "");
+  b.style.left = p.px + "%"; b.style.top = p.py + "%";
+  b.textContent = p.order;
+  b.setAttribute("aria-label", `${p.order}번 지점 ${p.id}`);
+  b.addEventListener("click", e => { if (suppressClick) { e.preventDefault(); return; } select(i, true); });
+  stage.appendChild(b);
+  return b;
+});
+
+/* ---------- 내 위치 ---------- */
+let watchId = null, me = null, follow = false;
+function following(on) {
+  follow = on; $("followBtn").setAttribute("aria-pressed", String(on));
+}
+function showMe(pos) {
+  const { latitude: lat, longitude: lon, accuracy } = pos.coords;
+  me = { lat, lon, acc: accuracy };
+  const [px, py] = toPct(lon, lat);
+  const el = $("me"); el.hidden = false; el.style.left = px + "%"; el.style.top = py + "%";
+  const r = accuracy / META.mpp; // 배경 지도 픽셀 단위 → 확대하면 같이 커짐
+  const acc = $("acc"); acc.style.width = acc.style.height = (2 * r) + "px";
+  const inside = px >= -5 && px <= 105 && py >= -5 && py <= 105;
+  $("gpsMsg").textContent = inside ? `현재 위치 오차 약 ${Math.round(accuracy)} m` : `현재 위치가 지도 범위 밖입니다 (오차 약 ${Math.round(accuracy)} m)`;
+  $("followBtn").disabled = false; $("nearBtn").disabled = false;
+  if (follow && inside) centerOnPct(px, py);
+  updateDistance();
+}
+function gpsError(err) {
+  stopGps();
+  const msg = { 1: "위치 사용이 허용되지 않았습니다.", 2: "위치를 찾을 수 없습니다. 하늘이 보이는 곳에서 다시 켜 주세요.", 3: "위치 응답이 늦습니다. 다시 켜 주세요." }[err && err.code] || "위치를 받을 수 없습니다.";
+  const inClaude = !!window.claude;
+  $("gpsMsg").textContent = msg + (inClaude && err && err.code === 1 ? " claude.ai 페이지에서는 위치가 막혀 있습니다. 위치가 필요하면 독립 실행 버전 주소로 여세요." : " 브라우저 설정에서 이 사이트의 위치 권한을 확인하세요.");
+}
+function startGps() {
+  if (!("geolocation" in navigator)) { gpsError(null); return; }
+  $("gpsBtn").setAttribute("aria-pressed", "true"); $("gpsBtn").textContent = "내 위치 끄기";
+  $("gpsMsg").textContent = "위치를 찾는 중…";
+  following(true);
+  try { watchId = navigator.geolocation.watchPosition(showMe, gpsError, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 }); }
+  catch (e) { gpsError(null); }
+}
+function stopGps() {
+  if (watchId !== null) { try { navigator.geolocation.clearWatch(watchId); } catch (e) {} }
+  watchId = null; following(false);
+  $("gpsBtn").setAttribute("aria-pressed", "false"); $("gpsBtn").textContent = "내 위치 켜기";
+}
+$("gpsBtn").onclick = () => watchId === null ? startGps() : (stopGps(), $("me").hidden = true, me = null, updateDistance(), $("gpsMsg").textContent = "위치를 껐습니다.");
+$("followBtn").onclick = () => { following(!follow); if (follow && me) { const [px, py] = toPct(me.lon, me.lat); centerOnPct(px, py); } };
+$("nearBtn").onclick = () => {
+  if (!me) return;
+  let best = 0, bd = Infinity;
+  POINTS.forEach((p, i) => { const c = checks[p.id]; const [d] = distBearing(me.lat, me.lon, p.lat, p.lon); const w = c ? d + 100000 : d; if (w < bd) { bd = w; best = i; } });
+  select(best, false);
+};
+function updateDistance() {
+  const box = $("cDist");
+  if (!me) { box.hidden = true; return; }
+  const p = POINTS[sel];
+  const [d, b] = distBearing(me.lat, me.lon, p.lat, p.lon);
+  box.hidden = false;
+  box.innerHTML = d < Math.max(8, me.acc) ? `<b>${p.id}</b> 근처에 도착했습니다 (약 ${Math.round(d)} m, 위치 오차 ${Math.round(me.acc)} m)`
+    : `현재 위치에서 <b>${p.id}</b>까지 <b>${d < 1000 ? Math.round(d) + " m" : (d / 1000).toFixed(2) + " km"}</b> · ${dirName(b)}쪽`;
+}
+
+/* ---------- 카드 ---------- */
+function fillForm(c) {
+  const v = x => (x === null || x === undefined) ? "" : String(x);
+  $("fBack").value = v(c && c.back); $("fCenter").value = v(c && c.center);
+  $("fFront").value = v(c && c.front); $("fC180").value = v(c && c.center180);
+  $("fSurface").value = (c && c.surface) || ""; $("fPlace").value = (c && c.place) || "";
+  $("fNote").value = (c && c.note) || "";
+}
+function readForm() {
+  return { back: parseNum($("fBack").value), center: parseNum($("fCenter").value), front: parseNum($("fFront").value),
+           center180: parseNum($("fC180").value), surface: $("fSurface").value, place: $("fPlace").value, note: $("fNote").value.trim() };
+}
+function updateResult() {
+  const p = POINTS[sel], f = readForm();
+  const bad = [f.back, f.center, f.front, f.center180].some(x => Number.isNaN(x));
+  const m = bad ? null : measuredMean(f), md = bad ? null : meanDeg(f), mc = bad ? null : measuredCenter(f);
+  $("rMean").textContent = m === null ? "–" : `${fmt(md, 2)}° (${fmt(m, 1)}%)`;
+  const e = m === null ? null : m - p.s10, e5 = mc === null ? null : mc - p.s5;
+  $("rErr").textContent = e === null ? "–" : fmt(e, 2) + "%p"; $("rErr").className = errCls(e);
+  $("rErr5").textContent = e5 === null ? "–" : fmt(e5, 2) + "%p"; $("rErr5").className = errCls(e5);
+  $("rGrade").textContent = `${grade(m)} / ${grade(p.s10)}`;
+}
+function select(i, fromMap) {
+  sel = i; const p = POINTS[i];
+  try { localStorage.setItem("slope-sel", p.id); } catch (e) {}
+  markers.forEach((m, k) => m.classList.toggle("sel", k === i));
+  $("cId").firstChild.textContent = p.id;
+  $("cOrder").textContent = `${p.order}번째 · ${p.line}`;
+  [["cS5", p.s5], ["cS10", p.s10], ["cS30", p.s30]].forEach(([id, v]) => { $(id).textContent = fmt(v, 1) + "%"; $(id + "d").textContent = fmt(pct2deg(v), 1) + "°"; });
+  $("cZ").textContent = p.z.toFixed(1) + " m";
+  const fl = $("cFlag");
+  fl.textContent = p.flags ? `${p.flags} 근처` : "주의 없음"; fl.className = "chip" + (p.flags ? "" : " ok");
+  $("cNeedle").style.transform = `rotate(${p.bearing}deg)`;
+  $("cDir").innerHTML = `DEM 오르막 방향 <b>${dirName(p.bearing)}</b> (${p.bearing}°)<br><span class="note">지도 화살표 쪽으로 수평계를 놓고, 오르막이면 +</span>`;
+  $("lMap").href = `https://map.kakao.com/link/map/${p.id},${p.lat},${p.lon}`;
+  $("lRv").href = `https://map.kakao.com/link/roadview/${p.lat},${p.lon}`;
+  const a = $("arrow"); a.hidden = false; a.style.left = p.px + "%"; a.style.top = p.py + "%";
+  a.firstChild.style.transform = `rotate(${p.bearing}deg)`;
+  fillForm(checks[p.id]); dirty = false; updateResult(); updateDistance();
+  $("savedMsg").textContent = checks[p.id] ? (checks[p.id].status === "skip" ? "측정 불가로 표시된 지점" : "저장된 측정값을 불러왔습니다") : "";
+  $("savedMsg").className = "saved";
+  renderTable();
+  if (fromMap) $("card").scrollIntoView({ behavior: "smooth", block: "start" });
+  else { following(false); centerOnPct(p.px, p.py, fitS * 2.5); }
+}
+document.querySelectorAll(".sign").forEach(b => b.addEventListener("click", () => {
+  const inp = $(b.dataset.for); const n = parseNum(inp.value);
+  if (n === null) inp.value = "-"; else if (!Number.isNaN(n)) inp.value = String(-n);
+  inp.focus(); dirty = true; updateResult();
+}));
+["fBack","fCenter","fFront","fC180"].forEach(id => $(id).addEventListener("input", updateResult));
+$("form").addEventListener("input", () => { dirty = true; });
+$("form").addEventListener("change", () => { dirty = true; });
+$("prev").onclick = () => select((sel - 1 + POINTS.length) % POINTS.length);
+$("next").onclick = () => select((sel + 1) % POINTS.length);
+
+/* ---------- 저장: claude.ai에서는 공유 저장소, 밖에서는 이 기기 ---------- */
+function loadLocal() { try { return JSON.parse(localStorage.getItem(LSKEY) || "{}") || {}; } catch (e) { return {}; } }
+function saveLocal() { try { localStorage.setItem(LSKEY, JSON.stringify(checks)); return true; } catch (e) { return false; } }
+async function write(status) {
+  const p = POINTS[sel], f = readForm(), msg = $("savedMsg");
+  if ([f.back, f.center, f.front, f.center180].some(x => Number.isNaN(x))) { msg.textContent = "숫자가 아닌 값이 있습니다. 예: 2.4 또는 -1.5"; msg.className = "saved err"; return; }
+  if ([f.back, f.center, f.front, f.center180].some(x => has(x) && Math.abs(x) >= 45)) { msg.textContent = "각도가 45° 이상입니다. 단위가 %로 되어 있지 않은지 확인해 주세요."; msg.className = "saved err"; return; }
+  const m = measuredMean(f), mc = measuredCenter(f);
+  if (status === "done" && m === null) { msg.textContent = "뒤 5m, 중앙, 앞 5m 중 하나 이상을 입력해야 저장할 수 있습니다."; msg.className = "saved err"; return; }
+  const body = { id: p.id, order: p.order, unit: "deg", ...f, status, measured: m, measuredDeg: meanDeg(f), center: f.center, centerPct: mc,
+                 dem5: p.s5, dem10: p.s10, dem30: p.s30,
+                 err: m === null ? null : m - p.s10, err5: mc === null ? null : mc - p.s5, updatedAt: new Date().toISOString(), by: uid,
+                 gps: me ? { lat: +me.lat.toFixed(7), lon: +me.lon.toFixed(7), acc: Math.round(me.acc) } : null };
+  const done = () => { dirty = false; render();
+    msg.textContent = status === "skip" ? `${p.id} 측정 불가로 표시했습니다` : `${p.id} 저장했습니다 · 오차 ${fmt(body.err, 2)}%p` + (mode === "local" ? " (이 기기에 저장)" : "");
+    msg.className = "saved"; };
+  if (mode === "local") { checks[p.id] = body; if (saveLocal()) done(); else { msg.textContent = "이 브라우저에 저장하지 못했습니다. CSV 복사로 기록을 남겨 주세요."; msg.className = "saved err"; } return; }
+  if (!canWrite) { msg.textContent = "이 페이지에 쓸 권한이 없습니다(보기 전용)."; msg.className = "saved err"; return; }
+  $("save").disabled = true; $("skip").disabled = true;
+  try { await db.collection("checks").doc(p.id).set(body); checks[p.id] = body; done(); }
+  catch (e) {
+    if (e && e.code === "invalid_argument") { canWrite = false; msg.textContent = "이 페이지에 쓸 권한이 없습니다(보기 전용)."; }
+    else if (e && e.code === "unavailable") msg.textContent = "연결이 잠시 불안정합니다. 저장을 다시 눌러 주세요.";
+    else msg.textContent = "저장하지 못했습니다: " + ((e && e.message) || "알 수 없는 오류");
+    msg.className = "saved err";
+  } finally { $("save").disabled = false; $("skip").disabled = false; }
+}
+$("save").onclick = () => write("done");
+$("skip").onclick = () => write("skip");
+
+/* ---------- 목록·요약 ---------- */
+function renderTable() {
+  const tb = $("tbody"); tb.textContent = "";
+  POINTS.forEach((p, i) => {
+    const c = checks[p.id]; const tr = document.createElement("tr");
+    if (i === sel) tr.className = "sel";
+    const ok = c && c.status === "done";
+    const e = ok && has(c.err) ? c.err : null, e5 = ok && has(c.err5) ? c.err5 : null;
+    const cells = [p.order, p.id + (p.flags ? " ◆" : ""), fmt(p.s5) + "%", fmt(p.s10) + "%", ok ? fmt(c.measured) + "%" : "–", e === null ? "–" : fmt(e), e5 === null ? "–" : fmt(e5), !c ? "대기" : c.status === "skip" ? "불가" : "완료"];
+    cells.forEach((t, k) => { const td = document.createElement("td"); td.textContent = t; if (k >= 2 && k <= 6) td.className = "n"; if (k === 5) td.className += " " + errCls(e); if (k === 6) td.className += " " + errCls(e5); tr.appendChild(td); });
+    tr.addEventListener("click", () => select(i));
+    tb.appendChild(tr);
+  });
+}
+function render() {
+  markers.forEach((m, i) => { const c = checks[POINTS[i].id]; m.classList.toggle("done", !!c && c.status === "done"); m.classList.toggle("skip", !!c && c.status === "skip"); });
+  const done = POINTS.map(p => checks[p.id]).filter(c => c && c.status === "done" && c.err !== null && c.err !== undefined);
+  const n = done.length, errs = done.map(c => c.err);
+  const mean = n ? errs.reduce((a, b) => a + b, 0) / n : null;
+  const mae = n ? errs.reduce((a, b) => a + Math.abs(b), 0) / n : null;
+  const rmse = n ? Math.sqrt(errs.reduce((a, b) => a + b * b, 0) / n) : null;
+  const within1 = errs.filter(e => Math.abs(e) <= 1).length;
+  const gradeSame = done.filter(c => grade(c.measured) === grade(c.dem10)).length;
+  const e5s = done.map(c => c.err5).filter(has);
+  const mae5 = e5s.length ? e5s.reduce((a, b) => a + Math.abs(b), 0) / e5s.length : null;
+  const skipped = POINTS.filter(p => checks[p.id] && checks[p.id].status === "skip").length;
+  $("prog").innerHTML = `측정 <b>${n}</b>/${POINTS.length}` + (skipped ? ` · 불가 ${skipped}` : "");
+  $("mae").innerHTML = `평균 |오차| <b>${mae === null ? "–" : mae.toFixed(2) + "%p"}</b>`;
+  const S = $("summary"); S.textContent = "";
+  [["측정 완료", n ? `${n}곳` : "–"], ["치우침 (10m)", mean === null ? "–" : fmt(mean, 2) + "%p"], ["평균 |오차| 10m", mae === null ? "–" : mae.toFixed(2) + "%p"],
+   ["평균 |오차| 5m", mae5 === null ? "–" : mae5.toFixed(2) + "%p"], ["RMSE 10m", rmse === null ? "–" : rmse.toFixed(2) + "%p"],
+   ["±1%p 안 (10m)", n ? `${within1}/${n}` : "–"], ["등급 일치", n ? `${gradeSame}/${n}` : "–"]]
+    .forEach(([k, v]) => { const d = document.createElement("div"); const sp = document.createElement("span"); sp.textContent = k; const b = document.createElement("b"); b.textContent = v; d.append(sp, b); S.appendChild(d); });
+  $("sumNote").textContent = n ? "오차 10m = 세 곳 평균 − DEM 10m, 오차 5m = 중앙 − DEM 5m (모두 %로 환산). +면 DEM이 경사를 낮게 본 것입니다. 등급 기준: 5.6%(3.2°) 이하 가능, 8.3%(4.7°) 이하 주의, 그 위 어려움." : "아직 저장된 측정이 없습니다. 지도에서 1번 지점을 누르고 측정값을 저장하면 여기에 오차가 쌓입니다.";
+  renderTable();
+}
+function csv() {
+  const head = ["순서","ID","위도","경도","오르막방위","DEM표고_m","DEM경사5m_%","DEM경사10m_%","DEM경사30m_%","주의","상태","뒤5m_도","중앙_도","중앙180_도","앞5m_도","세곳평균_도","세곳평균_%","중앙_%","오차10m_%p","오차5m_%p","노면","잰위치","메모","저장시각","저장위치_위도","저장위치_경도","위치오차m"];
+  const q = v => { v = v === null || v === undefined ? "" : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const f3 = v => has(v) ? v.toFixed(3) : "";
+  const rows = POINTS.map(p => { const c = checks[p.id] || {}; const g = c.gps || {}; return [p.order, p.id, p.lat, p.lon, p.bearing, p.z, p.s5, p.s10, p.s30, p.flags, c.status || "", c.back, c.center, c.center180, c.front,
+    f3(c.measuredDeg), f3(c.measured), f3(c.centerPct), f3(c.err), f3(c.err5), c.surface, c.place, c.note, c.updatedAt, g.lat, g.lon, g.acc].map(q).join(","); });
+  return "﻿" + head.join(",") + "\n" + rows.join("\n") + "\n";
+}
+$("copy").onclick = async () => {
+  const t = csv();
+  try { await navigator.clipboard.writeText(t); $("copy").textContent = "복사했습니다"; setTimeout(() => $("copy").textContent = "CSV 복사", 2000); }
+  catch (e) { const ta = $("csvText"); ta.hidden = false; ta.value = t; ta.select(); $("copy").textContent = "아래 글자를 직접 복사하세요"; }
+};
+
+/* ---------- 시작 ---------- */
+let start = 0;
+try { const sv = localStorage.getItem("slope-sel"); const k = POINTS.findIndex(p => p.id === sv); if (k >= 0) start = k; } catch (e) {}
+checks = loadLocal();
+render(); select(start, true);
+
+(async () => {
+  const banner = $("status");
+  const inClaude = !!(window.claude && window.claude.use);
+  if (!inClaude) {
+    banner.hidden = false;
+    banner.textContent = "독립 실행 버전입니다. 측정값은 이 기기의 브라우저에만 저장됩니다. 측정이 끝나면 맨 아래 'CSV 복사'로 기록을 보내 주세요.";
+    return;
+  }
+  const dl = await window.claude.use("downloads");
+  if (dl) { const b = $("csv"); b.hidden = false; b.onclick = async () => { try { await dl.save({ filename: "slope_check.csv", data: csv() }); } catch (e) { if (e && e.code !== "declined") { banner.hidden = false; banner.textContent = "CSV를 내려받지 못했습니다. CSV 복사를 써 주세요."; } } }; }
+  const user = await window.claude.use("user");
+  if (user) { try { uid = await user.id(); } catch (e) {} try { if ((await user.can("data.write")) === false) canWrite = false; } catch (e) {} }
+  db = await window.claude.use("db");
+  if (!db) { banner.hidden = false; banner.textContent = "공유 저장소에 연결할 수 없어 이 기기에만 저장합니다. claude.ai에 로그인한 상태로 열면 공유 저장소에 저장됩니다."; return; }
+  mode = "db";
+  if (!canWrite) { banner.hidden = false; banner.textContent = "보기 전용입니다. 측정값을 저장하려면 이 페이지의 편집 권한이 필요합니다."; }
+  const timer = setTimeout(() => { banner.hidden = false; banner.textContent = "저장된 측정값을 아직 불러오지 못했습니다. 연결이 느린 것 같습니다. 측정은 계속 입력할 수 있습니다."; }, 10000);
+  db.collection("checks").onSnapshot(snap => {
+    if (!snap.metadata.fromCache) { clearTimeout(timer); if (banner.textContent.startsWith("저장된 측정값을 아직")) banner.hidden = true; }
+    const next = {}; snap.docs.forEach(d => { if (d.exists) next[d.id] = d.data(); });
+    checks = next; render();
+    if (!dirty) { fillForm(checks[POINTS[sel].id]); updateResult(); }
+  }, () => { clearTimeout(timer); banner.hidden = false; banner.textContent = "공유 저장소 연결이 끊겼습니다. 페이지를 다시 열어 주세요."; });
+})();
+</script>

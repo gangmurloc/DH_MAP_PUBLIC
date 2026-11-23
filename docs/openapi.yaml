@@ -1,0 +1,157 @@
+openapi: 3.1.0
+info:
+  title: 동해 무장애지도 공개 API
+  version: "1.0.0"
+  description: |
+    동해시 보행 구간의 휠체어·유모차 통행 등급, 장애물, 횡단보도, 주요 기관을 로그인 없이 제공한다 (R-501, R-503).
+    길 안내는 앱 안에서 계산하며 API로 내지 않는다 (2026-11-20: 법 기준 경로 규칙이 앱에만 있음).
+
+    - 좌표는 모두 WGS84 경위도(EPSG:4326), 순서는 **경도, 위도**
+    - 등급: `unsurveyed` 미조사 · `passable` 통행 가능 · `caution` 주의 · `difficult` 통행 어려움
+    - 미조사 구간의 `dem_*` 값은 등고선으로 만든 5m DEM 추정이다. 짧은 급경사를 낮게 보는 경향이 있어 '확인 필요'로만 쓴다
+    - 시민 제보 원문·사진, 제보자·조사자 정보, 측정 원자료는 내보내지 않는다
+  license:
+    name: 레이어별 출처 표시 (응답의 license 필드). 수치지도 기반 형상은 공공누리 제1유형
+servers:
+  - url: https://donghae-barrier-free-map.vercel.app/api
+    description: Vercel 함수 (app/api/features.ts, app/api/health.ts → app/server/publicApi.ts)
+paths:
+  /features:
+    get:
+      summary: 레이어 GeoJSON
+      description: 한 번에 최대 1,000건. `truncated`가 true면 `bbox`를 나눠 다시 요청한다 (시 전체 구간은 약 3만 개).
+      parameters:
+        - name: layer
+          in: query
+          schema: { type: string, enum: [segments, obstacles, crossings, places], default: segments }
+        - name: bbox
+          in: query
+          description: 서경,남위,동경,북위
+          schema: { type: string, example: "129.10,37.51,129.12,37.53" }
+        - name: grade
+          in: query
+          description: segments만. 쉼표로 여러 개
+          schema: { type: string, example: "passable,caution" }
+        - name: status
+          in: query
+          description: obstacles만. 쉼표로 여러 개 (reported, confirmed, verified, resolved)
+          schema: { type: string, example: "verified" }
+        - name: since
+          in: query
+          description: 이 시각 이후 바뀐 것만 (segments, obstacles)
+          schema: { type: string, format: date-time, example: "2026-11-20" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 1000 }
+      responses:
+        "200":
+          description: GeoJSON FeatureCollection
+          content:
+            application/geo+json:
+              schema: { $ref: "#/components/schemas/FeatureCollection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "502": { $ref: "#/components/responses/ServerError" }
+  /health:
+    get:
+      summary: 상태 확인 (모니터링용)
+      responses:
+        "200":
+          description: 정상 (DB까지 닿음)
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { const: ok }, ms: { type: integer }, time: { type: string, format: date-time } } }
+        "503":
+          description: DB 응답 없음
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { const: db_unreachable }, ms: { type: integer }, time: { type: string } } }
+components:
+  responses:
+    BadRequest:
+      description: 잘못된 파라미터
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ServerError:
+      description: DB 조회 실패 (error=query_failed)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string, example: bad_request }
+        message: { type: string }
+    Grade:
+      type: string
+      enum: [unsurveyed, passable, caution, difficult]
+    FeatureCollection:
+      type: object
+      required: [type, features]
+      properties:
+        type: { const: FeatureCollection }
+        license: { type: string }
+        count: { type: integer }
+        truncated: { type: boolean, description: "limit만큼 꽉 찼음 = 더 있을 수 있음" }
+        features:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { const: Feature }
+              id: { type: integer }
+              geometry: { type: object, description: GeoJSON Point 또는 LineString }
+              properties:
+                oneOf:
+                  - $ref: "#/components/schemas/SegmentProps"
+                  - $ref: "#/components/schemas/ObstacleProps"
+                  - $ref: "#/components/schemas/CrossingProps"
+                  - $ref: "#/components/schemas/PlaceProps"
+    SegmentProps:
+      type: object
+      properties:
+        id: { type: integer }
+        length_m: { type: number }
+        grade: { $ref: "#/components/schemas/Grade" }
+        grade_source: { type: string, enum: [dem, survey] }
+        surveyed_at: { type: [string, "null"], format: date-time }
+        measured_incline_max_pct: { type: [number, "null"], description: 현장 측정 진행 방향 경사 중 최대 |값| }
+        dem_incline_pct: { type: [number, "null"], description: "DEM 평균 경사, 형상 방향(부호 있음)" }
+        dem_incline_max_pct: { type: [number, "null"], description: DEM 30m 창 최대 |경사| }
+        dem_estimate: { type: string, enum: [gentle, moderate, steep, unknown] }
+        has_sidewalk: { type: boolean }
+        sidewalk_width_m: { type: [number, "null"] }
+        on_bridge: { type: boolean }
+        near_stairs: { type: boolean }
+        in_tunnel: { type: boolean }
+        underpass_no_sidewalk: { type: boolean }
+        overpass_nearby: { type: [string, "null"], enum: [accessible, inaccessible, null] }
+        road_class: { type: [string, "null"] }
+        source_data: { type: string }
+    ObstacleProps:
+      type: object
+      properties:
+        id: { type: integer }
+        type: { type: string, enum: [kerb, stairs, steep, narrow, damaged] }
+        status: { type: string, enum: [reported, confirmed, verified, resolved] }
+        tags: { type: object }
+        segment_id: { type: [integer, "null"] }
+        kerb_height_m: { type: [number, "null"] }
+        width_m: { type: [number, "null"] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CrossingProps:
+      type: object
+      properties:
+        node_id: { type: integer }
+        crossing_count: { type: integer }
+        crossing_kerb: { type: [string, "null"], enum: [lowered, raised, flush, null] }
+        crossing_ambiguous: { type: boolean }
+        source: { type: [string, "null"] }
+    PlaceProps:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        category: { type: string, enum: [transport, public, health, welfare, safety, library, culture, market, post] }

@@ -1,0 +1,7 @@
+numpy
+scipy
+rasterio
+pyshp
+pyamg
+shapely
+psycopg[binary]

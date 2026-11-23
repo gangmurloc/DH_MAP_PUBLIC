@@ -1,0 +1,24 @@
+# 비밀값: 각자 app/.env.example을 app/.env.local로 복사해 채운다 (저장소에 올리지 않는다)
+.env
+.env.*
+!.env.example
+app/.vercel/
+.vercel/
+
+# 원본 공공데이터·중간 결과: 크고, 각 기관에서 직접 받는다 (README '데이터' 절)
+scripts/prep/raw/
+scripts/prep/out/
+동해 경사/
+*.zip
+전국횡단보도표준데이터.csv
+*.pdf
+
+# 설치·빌드 결과
+node_modules/
+dist/
+dist-ssr/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.log

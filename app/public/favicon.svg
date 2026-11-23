@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <!-- 팀 표시 (SlopeApp.tsx TeamMark와 같은 모양·색): 바다 위로 떠오르는 해. 다크 탭에서도 보이게 흰 둥근 칸 위에 -->
+  <defs>
+    <clipPath id="w">
+      <path d="M0 0H48V25q-3 2.4-6 0t-6 0t-6 0t-6 0t-6 0t-6 0t-6 0t-6 0Z" />
+    </clipPath>
+  </defs>
+  <rect width="48" height="48" rx="11" fill="#ffffff" />
+  <g transform="translate(3 6.5) scale(.875)">
+    <circle cx="24" cy="17" r="15" fill="#a8494d" clip-path="url(#w)" />
+    <path d="M3 35Q24 22 45 35Q24 31 3 35Z" fill="#2455ae" />
+  </g>
+</svg>

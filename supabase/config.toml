@@ -1,0 +1,12 @@
+# Supabase CLI 설정 (나머지 값은 CLI 기본값). 프로젝트 연결: supabase link --project-ref <ref>
+project_id = "donghae-barrier-free-map"
+
+# 공개 API: 로그인 없이 호출 (TECH_SPEC 6절). DB 접근은 함수 안에서 service_role로만.
+[functions.features]
+verify_jwt = false
+
+[functions.route]
+verify_jwt = false
+
+[functions.health]
+verify_jwt = false

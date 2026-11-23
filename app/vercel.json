@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": false
+  },
+  "functions": {
+    "api/stt.ts": {
+      "includeFiles": "node_modules/ffmpeg-static/ffmpeg",
+      "maxDuration": 30
+    }
+  }
+}
