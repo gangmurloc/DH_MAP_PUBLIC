@@ -94,3 +94,4 @@ python -I scripts/survey/slope_bundle.py scripts/prep/out/road_city scripts/prep
 
 - 코드: [MIT](LICENSE)
 - 데이터(`app/public/data/`): 위 '데이터' 표의 출처별 이용 조건을 따릅니다 (수치지도 공공누리 제1유형, OSM 형상 ODbL)
+
